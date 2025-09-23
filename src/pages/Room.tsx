@@ -8,6 +8,7 @@ import { Card } from "../components/ui/card"
 import { Input } from "../components/ui/input"
 import { ScrollArea } from "../components/ui/scroll-area"
 import { Camera, CameraOff, Mic, MicOff, Send, LogOut } from "lucide-react"
+import { useMedia } from "../hooks/useMedia"
 
 interface Message {
   id: string
@@ -20,64 +21,46 @@ export default function Room() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
 
-  const [isCameraOn, setIsCameraOn] = useState(false)
-  const [isMicOn, setIsMicOn] = useState(false)
-  const [stream, setStream] = useState<MediaStream | null>(null)
+  const {isCameraOn,
+      isMicOn,
+      stream,
+      toggleCamera,
+      toggleMic,
+  } = useMedia();
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState("")
   const [participantCount] = useState(1) // TODO: Just you for now
 
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  // Load persisted media settings
   useEffect(() => {
-    const cameraEnabled = sessionStorage.getItem("cameraEnabled") === "true"
-    const micEnabled = sessionStorage.getItem("micEnabled") === "true"
-
-    setIsCameraOn(cameraEnabled)
-    setIsMicOn(micEnabled)
-
-    if (cameraEnabled) {
-      initializeCamera()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const initializeCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: isMicOn,
-      })
-      setStream(mediaStream)
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream
+      if ( (isCameraOn || isMicOn) && videoRef.current) {
+        videoRef.current.srcObject = stream;
       }
-    } catch (error) {
-      console.error("Error accessing camera:", error)
-    }
-  }
+    }, [stream, isCameraOn, isMicOn]);
 
-  const toggleCamera = async () => {
-    if (isCameraOn) {
-      if (stream) {
-        stream.getVideoTracks().forEach((track) => track.stop())
-      }
-      setIsCameraOn(false)
-    } else {
-      await initializeCamera()
-      setIsCameraOn(true)
-    }
-  }
+  // // Load persisted media settings
+  // useEffect(() => {
+  //   if (cameraEnabled) {
+  //     initializeCamera()
+  //   }
+  // // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [])
 
-  const toggleMic = () => {
-    if (stream) {
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !isMicOn
-      })
-    }
-    setIsMicOn(!isMicOn)
-  }
+  // const initializeCamera = async () => {
+  //   try {
+  //     const mediaStream = await navigator.mediaDevices.getUserMedia({
+  //       video: true,
+  //       audio: isMicOn,
+  //     })
+  //     setStream(mediaStream)
+  //     if (videoRef.current) {
+  //       videoRef.current.srcObject = mediaStream
+  //     }
+  //   } catch (error) {
+  //     console.error("Error accessing camera:", error)
+  //   }
+  // }
 
   const sendMessage = () => {
     if (newMessage.trim()) {
@@ -93,9 +76,9 @@ export default function Room() {
   }
 
   const leaveRoom = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop())
-    }
+    // if (stream) {
+    //    stream.getTracks().forEach((track) => track.stop())
+    // }
     navigate("/")
   }
 

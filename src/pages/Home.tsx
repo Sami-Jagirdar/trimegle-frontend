@@ -1,92 +1,45 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useRef, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
 import { Camera, CameraOff, Mic, MicOff } from "lucide-react"
+import { useMedia } from "../hooks/useMedia"
 
 export default function Home() {
-  const [isCameraOn, setIsCameraOn] = useState(false)
-  const [isMicOn, setIsMicOn] = useState(false)
-  const [stream, setStream] = useState<MediaStream | null>(null)
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const navigate = useNavigate()
 
-  const toggleCamera = async () => {
-    if (isCameraOn) {
-      // Turn off camera
-      if (stream) {
-        stream.getVideoTracks().forEach((track) => track.stop())
-        setStream(null)
-      }
-      setIsCameraOn(false)
-    } else {
-      // Turn on camera
-      try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: isMicOn,
-        })
-        setStream(mediaStream)
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream
-        }
-        setIsCameraOn(true)
-      } catch (error) {
-        console.error("Error accessing camera:", error)
-      }
-    }
-  }
+  const {isCameraOn,
+    isMicOn,
+    stream,
+    toggleCamera,
+    toggleMic,
+  } = useMedia();
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-        videoRef.current.srcObject = stream;
+    if ( (isCameraOn || isMicOn) && videoRef.current) {
+      videoRef.current.srcObject = stream;
     }
-    }, [stream]);
-
-  const toggleMic = async () => {
-    if (isMicOn) {
-      // Turn off mic
-      if (stream) {
-        stream.getAudioTracks().forEach((track) => track.stop())
-      }
-      setIsMicOn(false)
-    } else {
-      // Turn on mic
-      try {
-        if (stream) {
-          // Add audio track to existing stream
-          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true })
-          const audioTrack = audioStream.getAudioTracks()[0]
-          stream.addTrack(audioTrack)
-        }
-        setIsMicOn(true)
-      } catch (error) {
-        console.error("Error accessing microphone:", error)
-      }
-    }
-  }
+  }, [stream, isCameraOn, isMicOn]);
 
   const joinRoom = () => {
     // Generate random room ID and navigate to room
     const roomId = Math.random().toString(36).substring(2, 8).toUpperCase()
-
-    // Store media settings in sessionStorage to persist across pages
-    sessionStorage.setItem("cameraEnabled", isCameraOn.toString())
-    sessionStorage.setItem("micEnabled", isMicOn.toString())
-
+    console.log(roomId);
     navigate(`/room/${roomId}`)
   }
 
-  useEffect(() => {
-    return () => {
-      // Cleanup stream on unmount
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop())
-      }
-    }
-  }, [stream])
+  // useEffect(() => {
+  //   return () => {
+  //     // Cleanup stream on unmount
+  //     if (stream) {
+  //       stream.getTracks().forEach((track) => track.stop())
+  //     }
+  //   }
+  // }, [stream])
   
 
   return (
