@@ -39,29 +39,6 @@ export default function Room() {
       }
     }, [stream, isCameraOn, isMicOn]);
 
-  // // Load persisted media settings
-  // useEffect(() => {
-  //   if (cameraEnabled) {
-  //     initializeCamera()
-  //   }
-  // // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, [])
-
-  // const initializeCamera = async () => {
-  //   try {
-  //     const mediaStream = await navigator.mediaDevices.getUserMedia({
-  //       video: true,
-  //       audio: isMicOn,
-  //     })
-  //     setStream(mediaStream)
-  //     if (videoRef.current) {
-  //       videoRef.current.srcObject = mediaStream
-  //     }
-  //   } catch (error) {
-  //     console.error("Error accessing camera:", error)
-  //   }
-  // }
-
   const sendMessage = () => {
     if (newMessage.trim()) {
       const message: Message = {
@@ -76,9 +53,6 @@ export default function Room() {
   }
 
   const leaveRoom = () => {
-    // if (stream) {
-    //    stream.getTracks().forEach((track) => track.stop())
-    // }
     navigate("/")
   }
 
