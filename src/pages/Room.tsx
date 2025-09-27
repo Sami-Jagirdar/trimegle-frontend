@@ -9,6 +9,8 @@ import { Input } from "../components/ui/input"
 import { ScrollArea } from "../components/ui/scroll-area"
 import { Camera, CameraOff, Mic, MicOff, Send, LogOut } from "lucide-react"
 import { useMedia } from "../hooks/useMedia"
+import { usePeerConnection } from "../hooks/usePeerConnection"
+import { useSocket } from "../hooks/useSocket"
 
 interface Message {
   id: string
@@ -20,6 +22,9 @@ interface Message {
 export default function Room() {
   const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
+  const socket = useSocket();
+  const {peerConnections, addPeerConnection} = usePeerConnection();
+  const [remoteStreams, setRemoteStreams] = useState<{ [peerId: string]: MediaStream }>({});
 
   const {isCameraOn,
       isMicOn,
@@ -39,6 +44,86 @@ export default function Room() {
       }
     }, [stream, isCameraOn, isMicOn]);
 
+  // Here we only answer offers or respond to answers
+  useEffect(() => {
+    if (!socket) return;
+
+    // listen for offers
+    socket.on("offer", async ({ from, sdp }) => {
+      const pc = addPeerConnection(from);
+      if (stream) {
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      }
+
+      pc.ontrack = (event) => {
+        // event.streams[0] contains the MediaStream from the other peer
+        setRemoteStreams((prev) => ({
+          ...prev,
+          [from]: event.streams[0],
+        }));
+      };
+
+      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("answer", { to: from, sdp: answer });
+    });
+
+    // listen for answers
+    socket.on("answer", async ({ from, sdp }) => {
+      const pc = peerConnections[from];
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      }
+
+      pc.ontrack = (event) => {
+        setRemoteStreams(prev => ({
+          ...prev,
+          [from]: event.streams[0],
+        }));
+      };
+    });
+
+    // listen for ICE candidates
+    socket.on("ice-candidate", async ({ from, candidate }) => {
+      const pc = peerConnections[from];
+      if (pc && candidate) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    });
+
+    // handle new peers (add local stream to the connection set up by new peers)
+    // socket.on("new-peer", async ({ user: peerId }) => {
+    //   const pc = addPeerConnection(peerId);
+
+    //   if (stream) {
+    //     stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    //   }
+
+    //   pc.onicecandidate = (event) => {
+    //     if (event.candidate) {
+    //       socket.emit("ice-candidate", { to: peerId, candidate: event.candidate });
+    //     }
+    //   };
+
+    //   pc.ontrack = (event) => {
+    //     setRemoteStreams(prev => ({
+    //       ...prev,
+    //       [peerId]: event.streams[0],
+    //     }));
+    //   };
+
+    // });
+
+    return () => {
+      socket.off("offer");
+      socket.off("answer");
+      socket.off("ice-candidate");
+      socket.off("new-peer");
+    };
+  }, [socket, stream, peerConnections, addPeerConnection]);
+
+
   const sendMessage = () => {
     if (newMessage.trim()) {
       const message: Message = {
@@ -53,6 +138,7 @@ export default function Room() {
   }
 
   const leaveRoom = () => {
+    //TODO: End connection here
     navigate("/")
   }
 
@@ -95,39 +181,33 @@ export default function Room() {
                 </div>
               </Card>
 
-              {/* Participant 2 Placeholder */}
-              <Card className="p-4">
-                <div className="aspect-video bg-muted rounded-lg overflow-hidden relative mb-3">
-                  <div className="w-full h-full flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="w-12 h-12 bg-muted-foreground/20 rounded-full flex items-center justify-center mx-auto mb-2">
-                        <span className="text-lg font-semibold text-muted-foreground">2</span>
+              {Object.entries(remoteStreams).map(([peerId, stream]) => (
+                <Card key={peerId} className="p-4 mb-4">
+                  <div className="aspect-video bg-muted rounded-lg overflow-hidden relative mb-3">
+                    {stream ? (
+                      <video
+                        autoPlay
+                        playsInline
+                        ref={(el) => {
+                          if (el) el.srcObject = stream;
+                        }}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <p className="text-sm text-muted-foreground">
+                          Waiting for participant...
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground">Waiting for participant...</p>
+                    )}
+                    <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
+                      {peerId}
                     </div>
                   </div>
-                  <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
-                    Participant 2
-                  </div>
-                </div>
-              </Card>
+                </Card>
+              ))}
 
-              {/* Participant 3 Placeholder */}
-              <Card className="p-4">
-                <div className="aspect-video bg-muted-foreground/5 rounded-lg overflow-hidden relative mb-3">
-                  <div className="w-full h-full flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="w-12 h-12 bg-muted-foreground/20 rounded-full flex items-center justify-center mx-auto mb-2">
-                        <span className="text-lg font-semibold text-muted-foreground">3</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground">Waiting for participant...</p>
-                    </div>
-                  </div>
-                  <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
-                    Participant 3
-                  </div>
-                </div>
-              </Card>
+
             </div>
 
             {/* Media Controls */}

@@ -7,12 +7,15 @@ import { Card } from "../components/ui/card"
 import { Camera, CameraOff, Mic, MicOff } from "lucide-react"
 import { useMedia } from "../hooks/useMedia"
 import { useSocket } from "../hooks/useSocket"
+import { usePeerConnection } from "../hooks/usePeerConnection"
 
 export default function Home() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const navigate = useNavigate();
   const socket = useSocket();
+  const {addPeerConnection} = usePeerConnection();
+  
 
   const {isCameraOn,
     isMicOn,
@@ -28,9 +31,27 @@ export default function Home() {
   }, [stream, isCameraOn, isMicOn]);
 
   const joinRoom = () => {
-    socket.emit("join", ({ roomId }: { roomId: string }) => {
-      console.log(roomId);
+    socket.emit("join", async ({ roomId, members }: { roomId: string, members: string[] }) => {
       navigate(`/room/${roomId}`);
+
+      // if there are existing members, offer to them immediately
+      for (const peerId of members) {
+        const pc = addPeerConnection(peerId);
+
+        if (stream) {
+          stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        }
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            socket.emit("ice-candidate", { to: peerId, candidate: event.candidate });
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit("offer", { to: peerId, sdp: offer });
+      }
     });
   };
 
