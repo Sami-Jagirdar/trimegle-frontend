@@ -6,11 +6,13 @@ import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
 import { Camera, CameraOff, Mic, MicOff } from "lucide-react"
 import { useMedia } from "../hooks/useMedia"
+import { useSocket } from "../hooks/useSocket"
 
 export default function Home() {
 
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const navigate = useNavigate()
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const navigate = useNavigate();
+  const socket = useSocket();
 
   const {isCameraOn,
     isMicOn,
@@ -26,11 +28,12 @@ export default function Home() {
   }, [stream, isCameraOn, isMicOn]);
 
   const joinRoom = () => {
-    // Generate random room ID and navigate to room
-    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase()
-    console.log(roomId);
-    navigate(`/room/${roomId}`)
-  }
+    socket.emit("join", ({ roomId }: { roomId: string }) => {
+      console.log(roomId);
+      navigate(`/room/${roomId}`);
+    });
+  };
+
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
