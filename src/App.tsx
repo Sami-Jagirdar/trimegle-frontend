@@ -14,7 +14,7 @@ function App() {
             <div className="min-h-screen bg-background text-foreground">
               <Routes>
                 <Route path="/" element={<Home />} />
-                <Route path="/room/:roomId" element={<Room />} />
+                <Route path="/room" element={<Room />} />
               </Routes>
             </div>
           </Router>

@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect } from "react"
-import { useParams, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
 import { Input } from "../components/ui/input"
@@ -20,11 +20,11 @@ interface Message {
 }
 
 export default function Room() {
-  const { roomId } = useParams<{ roomId: string }>()
   const navigate = useNavigate()
   const socket = useSocket();
   const {peerConnections, addPeerConnection} = usePeerConnection();
   const [remoteStreams, setRemoteStreams] = useState<{ [peerId: string]: MediaStream }>({});
+  const hasJoinedRef = useRef(false);
 
   const {isCameraOn,
       isMicOn,
@@ -34,7 +34,7 @@ export default function Room() {
   } = useMedia();
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState("")
-  const [participantCount] = useState(1) // TODO: Just you for now
+  const [participantCount, setParticipantCount] = useState(1)
 
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -44,85 +44,143 @@ export default function Room() {
       }
     }, [stream, isCameraOn, isMicOn]);
 
-  // Here we only answer offers or respond to answers
+  // Set up socket listeners first, BEFORE joining
   useEffect(() => {
     if (!socket) return;
 
-    // listen for offers
-    socket.on("offer", async ({ from, sdp }) => {
+    // Listen for offers from other peers
+    const handleOffer = async ({ from, sdp }: { from: string, sdp: RTCSessionDescriptionInit }) => {
+      console.log("Received offer from:", from);
+      
       const pc = addPeerConnection(from);
+      
+      // Add local tracks
       if (stream) {
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        stream.getTracks().forEach(track => {
+          pc.addTrack(track, stream);
+        });
       }
-
+      
+      // Handle remote tracks
       pc.ontrack = (event) => {
-        // event.streams[0] contains the MediaStream from the other peer
+        console.log("Received remote track from:", from);
         setRemoteStreams((prev) => ({
           ...prev,
           [from]: event.streams[0],
         }));
+        setParticipantCount(prev => prev + 1);
       };
 
+      // Handle ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log("Sending ICE candidate to:", from);
+          socket.emit("ice-candidate", { to: from, candidate: event.candidate });
+        }
+      };
+
+      // Set remote description and create answer
       await pc.setRemoteDescription(new RTCSessionDescription(sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      
+      console.log("Sending answer to:", from);
       socket.emit("answer", { to: from, sdp: answer });
-    });
+    };
 
-    // listen for answers
-    socket.on("answer", async ({ from, sdp }) => {
+    // Listen for answers from peers we sent offers to
+    const handleAnswer = async ({ from, sdp }: { from: string, sdp: RTCSessionDescriptionInit }) => {
+      console.log("Received answer from:", from);
       const pc = peerConnections[from];
-      if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+      
+      if (!pc) {
+        console.error("No peer connection found for:", from);
+        return;
       }
 
-      pc.ontrack = (event) => {
-        setRemoteStreams(prev => ({
-          ...prev,
-          [from]: event.streams[0],
-        }));
-      };
-    });
+      // Check the signaling state before setting remote description
+      console.log("PC signaling state:", pc.signalingState);
+      
+      if (pc.signalingState === "have-local-offer") {
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        console.log("Remote description set successfully");
+      } else {
+        console.warn("Cannot set remote description, current state:", pc.signalingState);
+      }
+    };
 
-    // listen for ICE candidates
-    socket.on("ice-candidate", async ({ from, candidate }) => {
+    // Listen for ICE candidates
+    const handleIceCandidate = async ({ from, candidate }: { from: string, candidate: RTCIceCandidateInit }) => {
       const pc = peerConnections[from];
       if (pc && candidate) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          console.log("Added ICE candidate from:", from);
+        } catch (err) {
+          console.error("Error adding ICE candidate:", err);
+        }
       }
-    });
+    };
 
-    // handle new peers (add local stream to the connection set up by new peers)
-    // socket.on("new-peer", async ({ user: peerId }) => {
-    //   const pc = addPeerConnection(peerId);
-
-    //   if (stream) {
-    //     stream.getTracks().forEach(track => pc.addTrack(track, stream));
-    //   }
-
-    //   pc.onicecandidate = (event) => {
-    //     if (event.candidate) {
-    //       socket.emit("ice-candidate", { to: peerId, candidate: event.candidate });
-    //     }
-    //   };
-
-    //   pc.ontrack = (event) => {
-    //     setRemoteStreams(prev => ({
-    //       ...prev,
-    //       [peerId]: event.streams[0],
-    //     }));
-    //   };
-
-    // });
+    socket.on("offer", handleOffer);
+    socket.on("answer", handleAnswer);
+    socket.on("ice-candidate", handleIceCandidate);
 
     return () => {
-      socket.off("offer");
-      socket.off("answer");
-      socket.off("ice-candidate");
-      socket.off("new-peer");
+      socket.off("offer", handleOffer);
+      socket.off("answer", handleAnswer);
+      socket.off("ice-candidate", handleIceCandidate);
     };
   }, [socket, stream, peerConnections, addPeerConnection]);
 
+  // Join room AFTER listeners are set up
+  useEffect(() => {
+    if (!socket || hasJoinedRef.current) return;
+    
+    hasJoinedRef.current = true;
+    console.log("Emitting join event...");
+    
+    socket.emit("join", async ({ members }: { members: string[] }) => {
+      console.log("Joined room with existing members:", members);
+      
+      // Create offers to all existing members
+      for (const peerId of members) {
+        console.log("Creating offer for existing member:", peerId);
+        const pc = addPeerConnection(peerId);
+
+        // Add local tracks
+        if (stream) {
+          stream.getTracks().forEach(track => {
+            pc.addTrack(track, stream);
+          });
+        }
+
+        // Handle remote tracks
+        pc.ontrack = (event) => {
+          console.log("Received remote track from:", peerId);
+          setRemoteStreams(prev => ({
+            ...prev,
+            [peerId]: event.streams[0],
+          }));
+          setParticipantCount(prev => prev + 1);
+        };
+
+        // Handle ICE candidates
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log("Sending ICE candidate to:", peerId);
+            socket.emit("ice-candidate", { to: peerId, candidate: event.candidate });
+          }
+        };
+
+        // Create and send offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        console.log("Sending offer to:", peerId);
+        socket.emit("offer", { to: peerId, sdp: offer });
+      }
+    });
+  }, [socket, stream, addPeerConnection]);
 
   const sendMessage = () => {
     if (newMessage.trim()) {
@@ -138,7 +196,8 @@ export default function Room() {
   }
 
   const leaveRoom = () => {
-    //TODO: End connection here
+    // Close all peer connections
+    Object.values(peerConnections).forEach(pc => pc.close());
     navigate("/")
   }
 
@@ -154,7 +213,7 @@ export default function Room() {
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Room {roomId}</h1>
+            <h1 className="text-2xl font-bold text-foreground">Room</h1>
             <p className="text-muted-foreground">{participantCount}/3 participants</p>
           </div>
           <Button variant="outline" onClick={leaveRoom} className="flex items-center space-x-2 bg-transparent">
@@ -181,15 +240,15 @@ export default function Room() {
                 </div>
               </Card>
 
-              {Object.entries(remoteStreams).map(([peerId, stream]) => (
-                <Card key={peerId} className="p-4 mb-4">
+              {Object.entries(remoteStreams).map(([peerId, remoteStream]) => (
+                <Card key={peerId} className="p-4">
                   <div className="aspect-video bg-muted rounded-lg overflow-hidden relative mb-3">
-                    {stream ? (
+                    {remoteStream ? (
                       <video
                         autoPlay
                         playsInline
                         ref={(el) => {
-                          if (el) el.srcObject = stream;
+                          if (el) el.srcObject = remoteStream;
                         }}
                         className="w-full h-full object-cover"
                       />
@@ -201,13 +260,20 @@ export default function Room() {
                       </div>
                     )}
                     <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
-                      {peerId}
+                      Participant {peerId.substring(0, 8)}
                     </div>
                   </div>
                 </Card>
               ))}
 
-
+              {/* Placeholder for third participant */}
+              {Object.keys(remoteStreams).length < 2 && (
+                <Card className="p-4">
+                  <div className="aspect-video bg-muted rounded-lg overflow-hidden relative mb-3 flex items-center justify-center">
+                    <p className="text-sm text-muted-foreground">Waiting for participant...</p>
+                  </div>
+                </Card>
+              )}
             </div>
 
             {/* Media Controls */}
