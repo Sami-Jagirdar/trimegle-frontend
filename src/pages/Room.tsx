@@ -7,7 +7,7 @@ import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
 import { Input } from "../components/ui/input"
 import { ScrollArea } from "../components/ui/scroll-area"
-import { Camera, CameraOff, Mic, MicOff, Send, LogOut } from "lucide-react"
+import { CameraOff, Send, LogOut } from "lucide-react"
 import { useMedia } from "../hooks/useMedia"
 import { usePeerConnection } from "../hooks/usePeerConnection"
 import { useSocket } from "../hooks/useSocket"
@@ -29,14 +29,20 @@ export default function Room() {
   const {isCameraOn,
       isMicOn,
       stream,
-      toggleCamera,
-      toggleMic,
+      // toggleCamera,
+      // toggleMic,
   } = useMedia();
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState("")
   const [participantCount, setParticipantCount] = useState(1)
 
   const videoRef = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+      if ( (isCameraOn || isMicOn) && videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    }, [stream, isCameraOn, isMicOn]);
 
   useEffect(() => {
       if ( (isCameraOn || isMicOn) && videoRef.current) {
@@ -277,7 +283,7 @@ export default function Room() {
             </div>
 
             {/* Media Controls */}
-            <div className="flex justify-center space-x-4">
+            {/* <div className="flex justify-center space-x-4">
               <Button
                 variant={isCameraOn ? "default" : "outline"}
                 onClick={toggleCamera}
@@ -295,7 +301,7 @@ export default function Room() {
                 {isMicOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
                 <span>{isMicOn ? "Mic On" : "Mic Off"}</span>
               </Button>
-            </div>
+            </div> */}
           </div>
 
           {/* Chat Sidebar */}
