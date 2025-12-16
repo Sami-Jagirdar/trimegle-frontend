@@ -24,6 +24,7 @@ export default function Room() {
   const socket = useSocket();
   const {peerConnections, addPeerConnection} = usePeerConnection();
   const [remoteStreams, setRemoteStreams] = useState<{ [peerId: string]: MediaStream }>({});
+  const [roomId, setRoomId] = useState<string | null>(null);
   const hasJoinedRef = useRef(false);
 
   const {isCameraOn,
@@ -146,9 +147,9 @@ export default function Room() {
     hasJoinedRef.current = true;
     console.log("Emitting join event...");
     
-    socket.emit("join", async ({ members }: { members: string[] }) => {
+    socket.emit("join", async ({ members, roomId }: { members: string[], roomId: string }) => {
       console.log("Joined room with existing members:", members);
-      
+      setRoomId(roomId);
       // Create offers to all existing members
       for (const peerId of members) {
         console.log("Creating offer for existing member:", peerId);
@@ -204,6 +205,8 @@ export default function Room() {
   const leaveRoom = () => {
     // Close all peer connections
     Object.values(peerConnections).forEach(pc => pc.close());
+    // Notify server
+    socket.emit("leave", { roomId: roomId, userId: socket.id });
     navigate("/")
   }
 
