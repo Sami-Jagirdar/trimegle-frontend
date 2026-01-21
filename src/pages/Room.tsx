@@ -22,17 +22,24 @@ interface Message {
 export default function Room() {
   const navigate = useNavigate()
   const socket = useSocket();
-  const {peerConnections, addPeerConnection} = usePeerConnection();
+  const {peerConnections, addPeerConnection, removePeerConnection, isIceConfigLoaded} = usePeerConnection();
+  const pendingCandidatesRef = useRef<{ [peerId: string]: RTCIceCandidateInit[] }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [peerId: string]: MediaStream }>({});
   const [roomId, setRoomId] = useState<string | null>(null);
   const hasJoinedRef = useRef(false);
 
+  // Used for cleanup on unmount
+  const roomIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    roomIdRef.current = roomId;
+  }, [roomId]);
+
+
   const {isCameraOn,
       isMicOn,
       stream,
-      // toggleCamera,
-      // toggleMic,
   } = useMedia();
+
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState("")
   const [participantCount, setParticipantCount] = useState(1)
@@ -45,149 +52,256 @@ export default function Room() {
       }
     }, [stream, isCameraOn, isMicOn]);
 
-  useEffect(() => {
-      if ( (isCameraOn || isMicOn) && videoRef.current) {
-        videoRef.current.srcObject = stream;
+
+  const setupPeerConnection = (pc: RTCPeerConnection, peerId: string) => {
+    // 1. Set up onTrack handlers 
+    pc.ontrack = (event) => {
+      console.log("Received remote track from:", peerId);
+      setRemoteStreams((prev) => ({
+        ...prev,
+        [peerId]: event.streams[0],
+      }));
+      setParticipantCount(prev => prev + 1);
+    };
+
+    // 2. Set up ICE candidate handlers
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log("Sending ICE candidate to:", peerId);
+        socket.emit("ice-candidate", { to: peerId, candidate: event.candidate });
       }
-    }, [stream, isCameraOn, isMicOn]);
+    };
+
+    // 3. Set up connection state handlers
+    pc.onconnectionstatechange = () => {
+      console.log(`Peer ${peerId} connection state:`, pc.connectionState);
+
+      if (pc.connectionState === "failed") {
+        console.error(`Connection with peer ${peerId} failed. Attempting to restart ICE...`);
+        pc.restartIce();
+      } else if (pc.connectionState === "disconnected") {
+        console.warn(`Peer ${peerId} disconnected.`);
+        handlePeerDisconnection(peerId);
+      } else if (pc.connectionState === "closed") {
+        console.log(`Peer ${peerId} connection closed.`);
+        handlePeerDisconnection(peerId);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[${peerId}] ICE connection state: ${pc.iceConnectionState}`);
+      
+      if (pc.iceConnectionState === 'failed') {
+        console.error(`[${peerId}] ICE connection failed`);
+        pc.restartIce();
+      }
+    };
+
+    pc.onicecandidateerror = (event) => {
+      console.error(`[${peerId}] ICE candidate error:`, {
+        errorCode: event.errorCode,
+        errorText: event.errorText,
+        url: event.url,
+      });
+    };
+
+    // 4. Add local tracks
+    if (stream) {
+      stream.getTracks().forEach(track => {
+        console.log(`[${peerId}] Adding ${track.kind} track`);
+        pc.addTrack(track, stream);
+      });
+    }
+  };
+
+  const handlePeerDisconnection = (peerId: string) => {
+    console.log(`[${peerId}] Cleaning up disconnected peer`);
+
+    setRemoteStreams((prev) => {
+      const { [peerId]: removed, ...rest } = prev;
+      console.log(`[${removed}] Removed remote stream`);
+      return rest;
+    });
+
+    setParticipantCount(prev => Math.max(1, prev - 1));
+    removePeerConnection(peerId);
+    delete pendingCandidatesRef.current[peerId];
+  };
+
+  const addQueuedCandidates = async (peerId: string, pc: RTCPeerConnection) => {
+    const queuedCandidates = pendingCandidatesRef.current[peerId] || [];
+    
+    if (queuedCandidates.length > 0) {
+      console.log(`[${peerId}] Adding ${queuedCandidates.length} queued ICE candidates`);
+      
+      for (const candidate of queuedCandidates) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (err) {
+          console.error(`[${peerId}] Error adding queued ICE candidate:`, err);
+        }
+      }
+      
+      // Clear the queue
+      pendingCandidatesRef.current[peerId] = [];
+    }
+  };
+
 
   // Set up socket listeners first, BEFORE joining
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !isIceConfigLoaded) return;
 
     // Listen for offers from other peers
     const handleOffer = async ({ from, sdp }: { from: string, sdp: RTCSessionDescriptionInit }) => {
       console.log("Received offer from:", from);
-      
-      const pc = addPeerConnection(from);
-      
-      // Add local tracks
-      if (stream) {
-        stream.getTracks().forEach(track => {
-          pc.addTrack(track, stream);
-        });
+
+      try {
+        // 1. Create Peer Connection
+        const pc = addPeerConnection(from);
+
+        // 2. Set up handlers
+        setupPeerConnection(pc, from);
+
+        // 3. Set Remote Description
+        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+
+        // 4. Add any queued ICE candidates
+        await addQueuedCandidates(from, pc);
+
+        // 5. Create and send Answer
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log("Sending answer to:", from);
+        socket.emit("answer", { to: from, sdp: answer });
+      } catch (error) {
+        console.error("Error handling offer from:", from, error);
+        handlePeerDisconnection(from);
       }
       
-      // Handle remote tracks
-      pc.ontrack = (event) => {
-        console.log("Received remote track from:", from);
-        setRemoteStreams((prev) => ({
-          ...prev,
-          [from]: event.streams[0],
-        }));
-        setParticipantCount(prev => prev + 1);
-      };
-
-      // Handle ICE candidates
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          console.log("Sending ICE candidate to:", from);
-          socket.emit("ice-candidate", { to: from, candidate: event.candidate });
-        }
-      };
-
-      // Set remote description and create answer
-      await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      
-      console.log("Sending answer to:", from);
-      socket.emit("answer", { to: from, sdp: answer });
     };
 
     // Listen for answers from peers we sent offers to
     const handleAnswer = async ({ from, sdp }: { from: string, sdp: RTCSessionDescriptionInit }) => {
-      console.log("Received answer from:", from);
+      console.log(`[${from}] Received answer`);
       const pc = peerConnections[from];
       
       if (!pc) {
-        console.error("No peer connection found for:", from);
+        console.error(`[${from}] No peer connection found`);
         return;
       }
 
-      // Check the signaling state before setting remote description
-      console.log("PC signaling state:", pc.signalingState);
-      
-      if (pc.signalingState === "have-local-offer") {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdp));
-        console.log("Remote description set successfully");
-      } else {
-        console.warn("Cannot set remote description, current state:", pc.signalingState);
+      try {
+        // Check signaling state before setting remote description
+        if (pc.signalingState === "have-local-offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(sdp));
+          console.log(`[${from}] Remote description set`);
+          
+          // Add any queued ICE candidates
+          await addQueuedCandidates(from, pc);
+        } else {
+          console.warn(`[${from}] Cannot set remote description, current state: ${pc.signalingState}`);
+        }
+      } catch (error) {
+        console.error(`[${from}] Error handling answer:`, error);
       }
     };
 
     // Listen for ICE candidates
     const handleIceCandidate = async ({ from, candidate }: { from: string, candidate: RTCIceCandidateInit }) => {
       const pc = peerConnections[from];
-      if (pc && candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          console.log("Added ICE candidate from:", from);
-        } catch (err) {
-          console.error("Error adding ICE candidate:", err);
-        }
+      if (!pc) {
+        console.warn(`[${from}] Received ICE candidate but no peer connection exists yet`);
+        return;
       }
+
+      // If remote description is not set yet, queue the candidate
+      if (!pc.remoteDescription) {
+        console.log(`[${from}] Queuing ICE candidate (remote description not set)`);
+        if (!pendingCandidatesRef.current[from]) {
+          pendingCandidatesRef.current[from] = [];
+        }
+        pendingCandidatesRef.current[from].push(candidate);
+        return;
+      }
+
+      // Add candidate immediately if remote description is set
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log(`[${from}] Added ICE candidate from: ${from}`);
+      } catch (err) {
+        console.error(`[${from}] Error adding ICE candidate:`, err);
+      }
+    };
+
+    // Handle peer disconnection
+    const handlePeerDisconnected = ({ socketId }: { socketId: string }) => {
+      console.log(`[${socketId}] Peer disconnected from server`);
+      handlePeerDisconnection(socketId);
     };
 
     socket.on("offer", handleOffer);
     socket.on("answer", handleAnswer);
     socket.on("ice-candidate", handleIceCandidate);
+    socket.on("peer-disconnected", handlePeerDisconnected);
+
 
     return () => {
       socket.off("offer", handleOffer);
       socket.off("answer", handleAnswer);
       socket.off("ice-candidate", handleIceCandidate);
+      socket.off("peer-disconnected", handlePeerDisconnected);
     };
-  }, [socket, stream, peerConnections, addPeerConnection]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, stream, peerConnections, addPeerConnection, removePeerConnection, isIceConfigLoaded]);
+
 
   // Join room AFTER listeners are set up
   useEffect(() => {
-    if (!socket || hasJoinedRef.current) return;
+    if (!socket || !isIceConfigLoaded || hasJoinedRef.current) return;
     
     hasJoinedRef.current = true;
-    console.log("Emitting join event...");
+    console.log("Joining room...");
     
     socket.emit("join", async ({ members, roomId }: { members: string[], roomId: string }) => {
       console.log("Joined room with existing members:", members);
       setRoomId(roomId);
+
       // Create offers to all existing members
       for (const peerId of members) {
-        console.log("Creating offer for existing member:", peerId);
-        const pc = addPeerConnection(peerId);
+        try {
+          console.log("Creating offer for existing member:", peerId);
 
-        // Add local tracks
-        if (stream) {
-          stream.getTracks().forEach(track => {
-            pc.addTrack(track, stream);
-          });
+          // 1. Create Peer Connection
+          const pc = addPeerConnection(peerId);
+
+          // 2. Set up handlers
+          setupPeerConnection(pc, peerId);
+
+          // 3. Create and send Offer
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          console.log("Sending offer to:", peerId);
+          socket.emit("offer", { to: peerId, sdp: offer });
+        } catch (error) {
+          console.error("Error creating offer for:", peerId, error);
+          handlePeerDisconnection(peerId);
         }
-
-        // Handle remote tracks
-        pc.ontrack = (event) => {
-          console.log("Received remote track from:", peerId);
-          setRemoteStreams(prev => ({
-            ...prev,
-            [peerId]: event.streams[0],
-          }));
-          setParticipantCount(prev => prev + 1);
-        };
-
-        // Handle ICE candidates
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            console.log("Sending ICE candidate to:", peerId);
-            socket.emit("ice-candidate", { to: peerId, candidate: event.candidate });
-          }
-        };
-
-        // Create and send offer
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        console.log("Sending offer to:", peerId);
-        socket.emit("offer", { to: peerId, sdp: offer });
       }
     });
-  }, [socket, stream, addPeerConnection]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, stream, isIceConfigLoaded, addPeerConnection]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(peerConnections).forEach(pc => pc.close());
+      if (socket && roomIdRef.current) {
+        socket.emit("leave", { roomId: roomIdRef.current, userId: socket.id });
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const sendMessage = () => {
     if (newMessage.trim()) {
@@ -203,10 +317,6 @@ export default function Room() {
   }
 
   const leaveRoom = () => {
-    // Close all peer connections
-    Object.values(peerConnections).forEach(pc => pc.close());
-    // Notify server
-    socket.emit("leave", { roomId: roomId, userId: socket.id });
     navigate("/")
   }
 
@@ -284,27 +394,6 @@ export default function Room() {
                 </Card>
               )}
             </div>
-
-            {/* Media Controls */}
-            {/* <div className="flex justify-center space-x-4">
-              <Button
-                variant={isCameraOn ? "default" : "outline"}
-                onClick={toggleCamera}
-                className="flex items-center space-x-2"
-              >
-                {isCameraOn ? <Camera className="w-4 h-4" /> : <CameraOff className="w-4 h-4" />}
-                <span>{isCameraOn ? "Camera On" : "Camera Off"}</span>
-              </Button>
-
-              <Button
-                variant={isMicOn ? "default" : "outline"}
-                onClick={toggleMic}
-                className="flex items-center space-x-2"
-              >
-                {isMicOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
-                <span>{isMicOn ? "Mic On" : "Mic Off"}</span>
-              </Button>
-            </div> */}
           </div>
 
           {/* Chat Sidebar */}
