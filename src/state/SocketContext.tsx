@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { socket } from "../lib/socket";
+import { socket } from "../services/socket";
 import { SocketContext } from "../hooks/useSocket";
 
 
