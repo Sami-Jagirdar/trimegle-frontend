@@ -2,7 +2,6 @@ import logo from './../assets/Logo.png'
 import { Button } from '../components/ui/button'
 import { LogIn } from 'lucide-react';
 
-
 export default function Login() {
     const handleGoogleLogin = () => {
         window.location.href = `${import.meta.env.VITE_SERVER_URL}/auth/google`;

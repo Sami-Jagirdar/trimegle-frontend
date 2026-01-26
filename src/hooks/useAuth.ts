@@ -15,11 +15,18 @@ export function useAuth() {
                 setToken(event.newValue);
             }
         }
+        const handleAuthChange = () => {
+            const updatedToken = localStorage.getItem('authToken');
+            setToken(updatedToken);
+        };
 
         window.addEventListener('storage', handleStorageChange);
+        window.addEventListener('authChanged', handleAuthChange);
+
 
         return () => {
             window.removeEventListener('storage', handleStorageChange);
+            window.removeEventListener('authChanged', handleAuthChange);
         };
     }, [])
 

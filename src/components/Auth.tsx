@@ -14,6 +14,7 @@ export default function Auth() {
         if (token) {
             localStorage.setItem('authToken', token);
             console.log('Authentication successful, token stored.');
+            window.dispatchEvent(new Event('authChanged'));
 
             setTimeout(() => {
                 navigate('/');
