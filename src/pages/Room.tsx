@@ -21,7 +21,7 @@ interface Message {
 
 export default function Room() {
   const navigate = useNavigate()
-  const socket = useSocket();
+  const socket = useSocket()!;
   const {peerConnections, addPeerConnection, removePeerConnection, isIceConfigLoaded} = usePeerConnection();
   const pendingCandidatesRef = useRef<{ [peerId: string]: RTCIceCandidateInit[] }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [peerId: string]: MediaStream }>({});

@@ -60,7 +60,6 @@ export default function Home() {
           {/* Media Controls */}
           <div className="flex justify-center space-x-4">
             <Button
-              variant={isCameraOn ? "default" : "default"}
               size="lg"
               onClick={toggleCamera}
               className="flex items-center space-x-2"
@@ -70,7 +69,6 @@ export default function Home() {
             </Button>
 
             <Button
-              variant={isMicOn ? "default" : "default"}
               size="lg"
               onClick={toggleMic}
               className="flex items-center space-x-2"
@@ -88,7 +86,7 @@ export default function Home() {
 
         {/* Privacy Notice */}
         <p className="text-xs text-muted-foreground text-center">
-          By joining, you agree to our terms. All chats are anonymous and not recorded.
+          By joining, you confirm that you are over 18 years old and agree to our terms. 
         </p>
       </div>
     </div>
