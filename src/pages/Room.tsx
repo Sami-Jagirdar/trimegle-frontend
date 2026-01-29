@@ -28,6 +28,13 @@ export default function Room() {
   const [roomId, setRoomId] = useState<string | null>(null);
   const hasJoinedRef = useRef(false);
 
+  const peerConnectionsRef = useRef(peerConnections);
+
+  // Keep the ref in sync with state
+  useEffect(() => {
+    peerConnectionsRef.current = peerConnections;
+  }, [peerConnections]);
+
   // Used for cleanup on unmount
   const roomIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -184,7 +191,7 @@ export default function Room() {
     // Listen for answers from peers we sent offers to
     const handleAnswer = async ({ from, sdp }: { from: string, sdp: RTCSessionDescriptionInit }) => {
       console.log(`[${from}] Received answer`);
-      const pc = peerConnections[from];
+      const pc = peerConnectionsRef.current[from];
       
       if (!pc) {
         console.error(`[${from}] No peer connection found`);
@@ -209,9 +216,14 @@ export default function Room() {
 
     // Listen for ICE candidates
     const handleIceCandidate = async ({ from, candidate }: { from: string, candidate: RTCIceCandidateInit }) => {
-      const pc = peerConnections[from];
+      const pc = peerConnectionsRef.current[from];
       if (!pc) {
         console.warn(`[${from}] Received ICE candidate but no peer connection exists yet`);
+
+        if (!pendingCandidatesRef.current[from]) {
+          pendingCandidatesRef.current[from] = [];
+        }
+        pendingCandidatesRef.current[from].push(candidate);
         return;
       }
 
@@ -231,6 +243,10 @@ export default function Room() {
         console.log(`[${from}] Added ICE candidate from: ${from}`);
       } catch (err) {
         console.error(`[${from}] Error adding ICE candidate:`, err);
+        if (!pendingCandidatesRef.current[from]) {
+          pendingCandidatesRef.current[from] = [];
+        }
+        pendingCandidatesRef.current[from].push(candidate);
       }
     };
 
@@ -269,24 +285,29 @@ export default function Room() {
 
       // Create offers to all existing members
       for (const peerId of members) {
-        try {
-          console.log("Creating offer for existing member:", peerId);
+        if (socket.id! > peerId) { // Only send offer if current user's ID is greater than peer
+          try {
+            console.log("Creating offer for existing member:", peerId);
 
-          // 1. Create Peer Connection
-          const pc = addPeerConnection(peerId);
+            // 1. Create Peer Connection
+            const pc = addPeerConnection(peerId);
 
-          // 2. Set up handlers
-          setupPeerConnection(pc, peerId);
+            // 2. Set up handlers
+            setupPeerConnection(pc, peerId);
 
-          // 3. Create and send Offer
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          console.log("Sending offer to:", peerId);
-          socket.emit("offer", { to: peerId, sdp: offer });
-        } catch (error) {
-          console.error("Error creating offer for:", peerId, error);
-          handlePeerDisconnection(peerId);
+            // 3. Create and send Offer
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            console.log("Sending offer to:", peerId);
+            socket.emit("offer", { to: peerId, sdp: offer });
+          } catch (error) {
+            console.error("Error creating offer for:", peerId, error);
+            handlePeerDisconnection(peerId);
+          }
+        } else {
+          console.log("Waiting for offer from: ", peerId);
         }
+        
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
