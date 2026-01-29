@@ -1,23 +1,22 @@
 "use client"
 
-import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
-import { Input } from "../components/ui/input"
-import { ScrollArea } from "../components/ui/scroll-area"
-import { CameraOff, Send, LogOut } from "lucide-react"
+// import { Input } from "../components/ui/input"
+// import { ScrollArea } from "../components/ui/scroll-area"
+import { CameraOff, LogOut } from "lucide-react"
 import { useMedia } from "../hooks/useMedia"
 import { usePeerConnection } from "../hooks/usePeerConnection"
 import { useSocket } from "../hooks/useSocket"
 
-interface Message {
-  id: string
-  text: string
-  timestamp: Date
-  sender: "you" | "user2" | "user3"
-}
+// interface Message {
+//   id: string
+//   text: string
+//   timestamp: Date
+//   sender: "you" | "user2" | "user3"
+// }
 
 export default function Room() {
   const navigate = useNavigate()
@@ -47,11 +46,11 @@ export default function Room() {
       stream,
   } = useMedia();
 
-  const [messages, setMessages] = useState<Message[]>([])
-  const [newMessage, setNewMessage] = useState("")
-  const [participantCount, setParticipantCount] = useState(1)
+  // const [messages, setMessages] = useState<Message[]>([])
+  // const [newMessage, setNewMessage] = useState("")
+  const [participantCount, setParticipantCount] = useState(1);
 
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
       if ( (isCameraOn || isMicOn) && videoRef.current) {
@@ -337,28 +336,58 @@ export default function Room() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const sendMessage = () => {
-    if (newMessage.trim()) {
-      const message: Message = {
-        id: Date.now().toString(),
-        text: newMessage,
-        timestamp: new Date(),
-        sender: "you",
+  // const sendMessage = () => {
+  //   if (newMessage.trim()) {
+  //     const message: Message = {
+  //       id: Date.now().toString(),
+  //       text: newMessage,
+  //       timestamp: new Date(),
+  //       sender: "you",
+  //     }
+  //     setMessages((prev) => [...prev, message])
+  //     setNewMessage("")
+  //   }
+  // }
+
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  const leaveRoom = async () => {
+    setIsLeaving(true);
+    
+    try {
+      // 1. Close all peer connections
+      Object.values(peerConnections).forEach(pc => {
+        pc.close();
+        console.log('Closed peer connection');
+      });
+      
+      // 2. Notify server
+      if (socket && roomIdRef.current) {
+        socket.emit("leave", { roomId: roomIdRef.current });
+        console.log('Emitted leave event');
       }
-      setMessages((prev) => [...prev, message])
-      setNewMessage("")
-    }
-  }
+      
+      // 3. Clear local state
+      setRemoteStreams({});
+      setParticipantCount(1);
+      pendingCandidatesRef.current = {};
+      
+      // 4. Small delay to ensure cleanup completes
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+    } finally {
+      // 5. Navigate
+      hasJoinedRef.current = false;
 
-  const leaveRoom = () => {
-    navigate("/")
-  }
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      sendMessage()
+      navigate("/");
     }
-  }
+  };
+
+  // const handleKeyPress = (e: React.KeyboardEvent) => {
+  //   if (e.key === "Enter") {
+  //     sendMessage()
+  //   }
+  // }
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -369,9 +398,9 @@ export default function Room() {
             <h1 className="text-2xl font-bold text-foreground">Room</h1>
             <p className="text-muted-foreground">{participantCount}/3 participants</p>
           </div>
-          <Button variant="outline" onClick={leaveRoom} className="flex items-center space-x-2 bg-transparent">
+          <Button variant="outline" onClick={leaveRoom} disabled={isLeaving} className="flex items-center space-x-2 bg-transparent">
             <LogOut className="w-4 h-4" />
-            <span>Leave Room</span>
+            <span>{isLeaving ? 'Leaving...' : 'Leave Room'}</span>
           </Button>
         </div>
 
@@ -431,7 +460,7 @@ export default function Room() {
           </div>
 
           {/* Chat Sidebar */}
-          <div className="lg:col-span-1">
+          {/* <div className="lg:col-span-1">
             <Card className="h-[600px] flex flex-col">
               <div className="p-4 border-b border-border">
                 <h3 className="font-semibold text-foreground">Chat</h3>
@@ -480,7 +509,7 @@ export default function Room() {
                 </div>
               </div>
             </Card>
-          </div>
+          </div> */}
         </div>
       </div>
     </div>
