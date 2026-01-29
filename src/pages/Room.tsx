@@ -302,7 +302,6 @@ export default function Room() {
 
       // Create offers to all existing members
       for (const peerId of members) {
-        if (socket.id! > peerId) { // Only send offer if current user's ID is greater than peer
           try {
             console.log("Creating offer for existing member:", peerId);
 
@@ -321,14 +320,11 @@ export default function Room() {
             console.error("Error creating offer for:", peerId, error);
             handlePeerDisconnection(peerId);
           }
-        } else {
-          console.log("Waiting for offer from: ", peerId);
-        }
         
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, stream, isIceConfigLoaded, addPeerConnection]);
+  }, [socket, isIceConfigLoaded]);
 
   // Cleanup on unmount
   useEffect(() => {
