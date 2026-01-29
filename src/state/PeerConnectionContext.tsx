@@ -55,7 +55,7 @@ export const PeerConnectionProvider: React.FC<PeerConnectionProps> = ({children}
                 const config: RTCConfiguration = {
                     iceServers: data.iceServers,
                     iceCandidatePoolSize: 10,
-                    iceTransportPolicy: 'relay', // 'relay' to force TURN for testing
+                    iceTransportPolicy: 'all', // 'relay' to force TURN for testing
                 };
 
                 setIceConfig(config);
