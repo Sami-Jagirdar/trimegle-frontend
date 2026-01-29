@@ -84,11 +84,22 @@ export default function Room() {
       console.log(`Peer ${peerId} connection state:`, pc.connectionState);
 
       if (pc.connectionState === "failed") {
-        console.error(`Connection with peer ${peerId} failed. Attempting to restart ICE...`);
-        pc.restartIce();
+        console.warn(`Connection with peer ${peerId} failed. Attempting to restart ICE...`);
+        setTimeout(() => {
+          if (pc.connectionState === "failed") {
+            console.error(`Connection still failed after 5s. Restarting ICE...`);
+            pc.restartIce();
+          } else {
+            console.log(`Connection recovered, no restart needed`);
+          }
+        }, 5000);
       } else if (pc.connectionState === "disconnected") {
         console.warn(`Peer ${peerId} disconnected.`);
-        handlePeerDisconnection(peerId);
+        setTimeout(() => {
+          if (pc.connectionState === "disconnected") {
+            handlePeerDisconnection(peerId);
+          }
+        }, 5000)
       } else if (pc.connectionState === "closed") {
         console.log(`Peer ${peerId} connection closed.`);
         handlePeerDisconnection(peerId);
@@ -99,8 +110,14 @@ export default function Room() {
       console.log(`[${peerId}] ICE connection state: ${pc.iceConnectionState}`);
       
       if (pc.iceConnectionState === 'failed') {
-        console.error(`[${peerId}] ICE connection failed`);
-        pc.restartIce();
+        setTimeout(() => {
+          if (pc.iceConnectionState === "failed") {
+            console.error(`Connection still failed after 5s. Restarting ICE...`);
+            pc.restartIce();
+          } else {
+            console.log(`Connection recovered, no restart needed`);
+          }
+        }, 5000);
       }
     };
 
