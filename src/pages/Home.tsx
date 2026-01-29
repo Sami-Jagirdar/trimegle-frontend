@@ -6,6 +6,8 @@ import { Button } from "../components/ui/button"
 import { Card } from "../components/ui/card"
 import { Camera, CameraOff, Mic, MicOff } from "lucide-react"
 import { useMedia } from "../hooks/useMedia"
+import logo from './../assets/Logo.png'
+
 
 export default function Home() {
 
@@ -36,9 +38,9 @@ export default function Home() {
         {/* Logo Placeholder */}
         <div className="text-center">
           <div className="w-24 h-24 mx-auto bg-primary/10 rounded-full flex items-center justify-center mb-4">
-            <span className="text-2xl font-bold text-primary">Trimegle</span> {/* Temporary Logo */}
-          </div>
-          <h1 className="text-3xl font-bold text-foreground">Anonymous 3-Way Chat</h1>
+                <img src={logo} alt="Trimegle Logo" />
+            </div>
+          <h1 className="text-3xl font-bold text-foreground">Trimegle</h1>
           <p className="text-muted-foreground mt-2">Connect with two strangers in a private video room</p>
         </div>
 

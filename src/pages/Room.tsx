@@ -398,7 +398,7 @@ export default function Room() {
             <h1 className="text-2xl font-bold text-foreground">Room</h1>
             <p className="text-muted-foreground">{participantCount}/3 participants</p>
           </div>
-          <Button variant="outline" onClick={leaveRoom} disabled={isLeaving} className="flex items-center space-x-2 bg-transparent">
+          <Button variant="outline" onClick={leaveRoom} disabled={isLeaving} className="flex items-center space-x-2 bg-blue-800 text-white">
             <LogOut className="w-4 h-4" />
             <span>{isLeaving ? 'Leaving...' : 'Leave Room'}</span>
           </Button>
